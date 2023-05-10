@@ -1,0 +1,364 @@
+<html>
+<head>
+<title>main.ipynb</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+main.ipynb</font>
+</center></td></tr></table>
+<pre><span class="s0">#%% md 
+</span><span class="s1">Python Group 
+Lab Assignment Seven: RNNs 
+Wali Chaudhary, Bryce Shurts, &amp; Alex Wright 
+</span><span class="s0">#%% md 
+</span><span class="s1"># Business Understanding 
+ 
+The dataset is sourced from data.world on Kaggle, and is called &quot;Emotion Detection from Text&quot;. It was distributed by data.world under a public license according to the source. The dataset is a collection of tweets annotated with emotions attached to each sample. 
+ 
+There exist 3 columns, &quot;tweet_id&quot;, &quot;sentiment&quot;, and &quot;content&quot;. Tweet_id represents the identification number of the tweet for querying with the Twitter API, sentiment is the classification of emotion associated with the content, and content is the raw text from the tweet. 
+ 
+The dataset contains 13 different emotions, with 40000 records. The dataset is imbalanced, as there are a different number of records per emotion, so this must be addressed in preprocessing the data. 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1"># Preparation 
+ 
+ 
+#### Splitting the data 
+We will be using Stratified K-Fold Cross Validation to split our data into training and testing sets. We chose this method based on the structure of our dataset. 
+ 
+The dataset contains imbalanced classes, so we want to ensure that the distribution of the training &amp; testing sets are representative of the overall distribution of classes in the dataset and is beneficial to reducing bias. Features like the sentiment feature are imbalanced with each of the 13 values associated with it having a different distribution across the dataset. Stratified K-Fold Cross Validation ensures this proportionality of distribution, unlike a normal train test split which randomly splits the data into two sets based on a predefined ratio. This can result in a skewed representation of classes in the training &amp; testing datasets not representative of the distribution of the entire dataset. 
+ 
+Stratified K-Fold Cross Validation also gives us the advantage of being able to compare different models as each model is trained differently per fold. This will help us in hyper parameter tuning. 
+ 
+ 
+#### Tokenization methods, Vocabulary, and content length 
+ 
+We use the Keras Tokenizer class to tokenize the text data in our dataset. We convert each tweet's text into a sequence of integers, where each integer represents a unique word in the vocabulary. The Tokenizer also takes care of lowercasing, removing punctuation, and handling out-of-vocabulary words. 
+ 
+We defined our vocabulary to use all the unique words in &quot;content&quot;, this was because we didn't want to lose any data as we thought this would also generalize our model better overall. Although this will increase the complexity of our model, and one could also argue that mispellings and grammatical errors can lead to an incorrect classification; we believe that grammatical errors and slang are common ways of emotional expression online. For example, if a user tweets GAAAAAHHHH, that probably means they're very upset versus someone who tweets GAH which may indicate surprise. 
+ 
+We decided to keep the length of each sequence to the longest individual sequence by using padding, as this'll help us capture the maximum amount of input for sentiment analysis. 
+ 
+ 
+#### Evaluation Metrics 
+ 
+For evaluation, we decided to rely on the F1 score, precision, recall, and accuracy. This is because we are performing a classification task on sequences to predict sentiment. Precision is important because it helps us guage the our models True positive predictiveness, and recall helps us identify the number of positive instances correctly identified out of the total amount of positive cases. In our specific case, recall is important because it'll tell us the ratio of how much our classifier was able to identify correct sentiment, like happiness, out the all of the happiness records. Precision will tell us if our evaluation of sentiment was correct. 
+ 
+The F1 score balances both of these metrics together, and provides a balanced measure of our models performance. In sentiment analysis, false positives and false negatives are not good because both types of errors can have significant consequences, especially in a system which relies on the classification to provide recommendations or critical information. A high F1-score indicates that our model is making accurate positive predictions while minimizing false positives and false negatives. It is also useful in our case as well since our dataset is imbalanced, because it reduces bias to the majority class by giving a balanced result of the recall and precision to account for both false positives and false negatives. 
+</span><span class="s0">#%% 
+# Handle all imports for notebook</span>
+
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s1">os.environ[</span><span class="s3">'TF_CPP_MIN_LOG_LEVEL'</span><span class="s1">] = </span><span class="s3">'1'</span>
+<span class="s2">import </span><span class="s1">tensorflow </span><span class="s2">as </span><span class="s1">tf</span>
+<span class="s2">from </span><span class="s1">tensorflow </span><span class="s2">import </span><span class="s1">keras</span>
+<span class="s2">from </span><span class="s1">PIL </span><span class="s2">import </span><span class="s1">Image</span>
+<span class="s2">from </span><span class="s1">os </span><span class="s2">import </span><span class="s1">listdir</span>
+<span class="s2">from </span><span class="s1">os.path </span><span class="s2">import </span><span class="s1">isfile</span><span class="s2">, </span><span class="s1">join</span>
+<span class="s2">from </span><span class="s1">skimage.transform </span><span class="s2">import </span><span class="s1">resize</span>
+<span class="s2">from </span><span class="s1">sklearn </span><span class="s2">import </span><span class="s1">preprocessing</span>
+<span class="s2">from </span><span class="s1">keras.models </span><span class="s2">import </span><span class="s1">Sequential</span>
+<span class="s2">from </span><span class="s1">keras.utils </span><span class="s2">import </span><span class="s1">plot_model</span>
+<span class="s2">from </span><span class="s1">keras.layers </span><span class="s2">import </span><span class="s1">Embedding</span>
+<span class="s2">from </span><span class="s1">keras.layers </span><span class="s2">import </span><span class="s1">LSTM</span>
+<span class="s2">from </span><span class="s1">keras.layers </span><span class="s2">import </span><span class="s1">Dense</span>
+<span class="s2">from </span><span class="s1">keras.layers </span><span class="s2">import </span><span class="s1">CuDNNLSTM</span>
+<span class="s2">from </span><span class="s1">keras.layers </span><span class="s2">import </span><span class="s1">Bidirectional</span>
+<span class="s2">from </span><span class="s1">keras.layers </span><span class="s2">import </span><span class="s1">CuDNNGRU</span>
+<span class="s2">from </span><span class="s1">sklearn.model_selection </span><span class="s2">import </span><span class="s1">train_test_split</span>
+<span class="s2">from </span><span class="s1">sklearn.model_selection </span><span class="s2">import </span><span class="s1">StratifiedShuffleSplit</span>
+<span class="s2">from </span><span class="s1">sklearn.metrics </span><span class="s2">import </span><span class="s1">roc_curve</span><span class="s2">, </span><span class="s1">auc</span><span class="s2">, </span><span class="s1">accuracy_score</span><span class="s2">, </span><span class="s1">confusion_matrix</span><span class="s2">, </span><span class="s1">classification_report</span>
+<span class="s2">from </span><span class="s1">keras.preprocessing.text </span><span class="s2">import </span><span class="s1">Tokenizer</span>
+<span class="s2">from </span><span class="s1">keras_preprocessing.sequence </span><span class="s2">import </span><span class="s1">pad_sequences</span>
+<span class="s0"># from keras.utils import pad_sequences</span>
+<span class="s2">from </span><span class="s1">sklearn.preprocessing </span><span class="s2">import </span><span class="s1">OneHotEncoder</span>
+<span class="s2">from </span><span class="s1">keras </span><span class="s2">import </span><span class="s1">regularizers</span>
+<span class="s0">#%% 
+</span><span class="s1">df = pd.read_csv(</span><span class="s3">&quot;tweet_emotions.csv&quot;</span><span class="s1">)</span>
+<span class="s0">#%% 
+</span><span class="s1">df.dropna(axis=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">inplace=</span><span class="s2">True</span><span class="s1">)</span>
+<span class="s1">df.drop(</span><span class="s3">&quot;tweet_id&quot;</span><span class="s2">, </span><span class="s1">inplace=</span><span class="s2">True, </span><span class="s1">axis=</span><span class="s4">1</span><span class="s1">)</span>
+
+<span class="s1">df.groupby(df[</span><span class="s3">&quot;sentiment&quot;</span><span class="s1">]).describe()</span>
+<span class="s0">#%% md 
+</span><span class="s1">This shows us that the sentiment feature is very imbalanced, with each of its 13 values having a different distribution across the dataset. The highest value, happiness with 5209 in count is significantly higher than the lowest count, anger, which has only 110 records. 
+ 
+Dropped the &quot;twitter_id&quot; column as that was not relevant to the task at hand for classifying sentiment. 
+</span><span class="s0">#%% 
+# Define the Stratified Shuffle Split object</span>
+<span class="s1">n_splits = </span><span class="s4">3</span>
+<span class="s1">test_size = </span><span class="s4">0.2</span>
+<span class="s1">sss = StratifiedShuffleSplit(n_splits=n_splits</span><span class="s2">, </span><span class="s1">test_size=test_size</span><span class="s2">, </span><span class="s1">random_state=</span><span class="s4">42</span><span class="s1">)</span>
+
+<span class="s1">X</span><span class="s2">, </span><span class="s1">y = df.drop(</span><span class="s3">&quot;sentiment&quot;</span><span class="s2">, </span><span class="s1">inplace=</span><span class="s2">False, </span><span class="s1">axis=</span><span class="s4">1</span><span class="s1">)</span><span class="s2">, </span><span class="s1">df[</span><span class="s3">&quot;sentiment&quot;</span><span class="s1">]</span>
+<span class="s0">#%% 
+#tokenize the text, use entire vocabulary</span>
+<span class="s1">tokenizer = Tokenizer()</span>
+<span class="s1">y_np = y.to_numpy().reshape(-</span><span class="s4">1</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+
+<span class="s0"># save as sequences with integers replacing words</span>
+<span class="s1">tokenizer.fit_on_texts(X[</span><span class="s3">&quot;content&quot;</span><span class="s1">])</span>
+<span class="s1">sequences = tokenizer.texts_to_sequences(X[</span><span class="s3">&quot;content&quot;</span><span class="s1">])</span>
+<span class="s1">final_seqs = pad_sequences(sequences</span><span class="s2">,</span><span class="s1">maxlen=</span><span class="s4">300</span><span class="s1">)</span>
+<span class="s1">num_vocab = len(tokenizer.word_index)+</span><span class="s4">1</span>
+
+<span class="s1">encoder = OneHotEncoder(handle_unknown=</span><span class="s3">'ignore'</span><span class="s1">)</span>
+<span class="s1">target = encoder.fit_transform(y_np).toarray()</span>
+<span class="s0">#%% 
+# Load in the word embeddings</span>
+<span class="s1">word_vectors = {}</span>
+<span class="s2">for </span><span class="s1">line </span><span class="s2">in </span><span class="s1">open(</span><span class="s3">&quot;glove.840B.300d.txt&quot;</span><span class="s1">):</span>
+    <span class="s1">value = line.split(</span><span class="s3">' '</span><span class="s1">)</span>
+    <span class="s1">word_vectors[value[</span><span class="s4">0</span><span class="s1">]] = np.array(value[</span><span class="s4">1</span><span class="s1">:]</span><span class="s2">,</span><span class="s1">dtype = </span><span class="s3">'float32'</span><span class="s1">)</span>
+
+<span class="s0"># Apply embeddings to dataset</span>
+<span class="s1">embedding_matrix_glove = np.zeros((num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s1">))</span>
+<span class="s2">for </span><span class="s1">word</span><span class="s2">, </span><span class="s1">index </span><span class="s2">in </span><span class="s1">tokenizer.word_index.items():</span>
+    <span class="s1">embedding = word_vectors.get(word)</span>
+    <span class="s2">if </span><span class="s1">embedding </span><span class="s2">is not None</span><span class="s1">:</span>
+        <span class="s1">embedding_matrix_glove[index] = embedding</span>
+<span class="s0">#%% 
+</span><span class="s2">import </span><span class="s1">matplotlib.pyplot </span><span class="s2">as </span><span class="s1">plt</span>
+
+<span class="s2">def </span><span class="s1">plot_history(history):</span>
+    <span class="s0"># Plot the training and validation accuracy vs training iterations</span>
+    <span class="s1">plt.plot(history.history[</span><span class="s3">'accuracy'</span><span class="s1">])</span>
+    <span class="s1">plt.plot(history.history[</span><span class="s3">'val_accuracy'</span><span class="s1">])</span>
+    <span class="s1">plt.title(</span><span class="s3">'Model Accuracy'</span><span class="s1">)</span>
+    <span class="s1">plt.ylabel(</span><span class="s3">'Accuracy'</span><span class="s1">)</span>
+    <span class="s1">plt.xlabel(</span><span class="s3">'Epoch'</span><span class="s1">)</span>
+    <span class="s1">plt.legend([</span><span class="s3">'Train'</span><span class="s2">, </span><span class="s3">'Validation'</span><span class="s1">]</span><span class="s2">, </span><span class="s1">loc=</span><span class="s3">'upper left'</span><span class="s1">)</span>
+    <span class="s1">plt.show()</span>
+
+    <span class="s0"># Plot the training and validation loss vs training iterations</span>
+    <span class="s1">plt.plot(history.history[</span><span class="s3">'loss'</span><span class="s1">])</span>
+    <span class="s1">plt.plot(history.history[</span><span class="s3">'val_loss'</span><span class="s1">])</span>
+    <span class="s1">plt.title(</span><span class="s3">'Model Loss'</span><span class="s1">)</span>
+    <span class="s1">plt.ylabel(</span><span class="s3">'Loss'</span><span class="s1">)</span>
+    <span class="s1">plt.xlabel(</span><span class="s3">'Epoch'</span><span class="s1">)</span>
+    <span class="s1">plt.legend([</span><span class="s3">'Train'</span><span class="s2">, </span><span class="s3">'Validation'</span><span class="s1">]</span><span class="s2">, </span><span class="s1">loc=</span><span class="s3">'upper left'</span><span class="s1">)</span>
+    <span class="s1">plt.show()</span>
+
+<span class="s0">#%% 
+</span><span class="s2">def </span><span class="s1">plot_metrics(class_reportings):</span>
+    <span class="s1">f1_scores = []</span>
+    <span class="s1">recall_scores = []</span>
+    <span class="s1">precision_scores = []</span>
+
+    <span class="s1">reportings = list(class_reportings.values())</span>
+    <span class="s2">for </span><span class="s1">idx </span><span class="s2">in </span><span class="s1">range(</span><span class="s4">0</span><span class="s2">, </span><span class="s4">13</span><span class="s1">):</span>
+        <span class="s1">f1_scores.append(reportings[idx][</span><span class="s3">'f1-score'</span><span class="s1">])</span>
+        <span class="s1">recall_scores.append(reportings[idx][</span><span class="s3">'recall'</span><span class="s1">])</span>
+        <span class="s1">precision_scores.append(reportings[idx][</span><span class="s3">'precision'</span><span class="s1">])</span>
+
+    <span class="s1">classes = y.unique().__array__()</span>
+    <span class="s1">fig</span><span class="s2">, </span><span class="s1">axs = plt.subplots(</span><span class="s4">1</span><span class="s2">, </span><span class="s4">3</span><span class="s2">, </span><span class="s1">figsize=(</span><span class="s4">10</span><span class="s2">, </span><span class="s4">4</span><span class="s1">))</span>
+    <span class="s0"># Plot the F1 scores in the first subplot</span>
+    <span class="s1">axs[</span><span class="s4">0</span><span class="s1">].plot(classes</span><span class="s2">, </span><span class="s1">f1_scores</span><span class="s2">, </span><span class="s1">marker=</span><span class="s3">'o'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">0</span><span class="s1">].set_title(</span><span class="s3">'F1 Scores by Class'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">0</span><span class="s1">].set_xlabel(</span><span class="s3">'Class'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">0</span><span class="s1">].set_ylabel(</span><span class="s3">'F1 Score'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">0</span><span class="s1">].set_xticks(range(len(classes)))</span>
+    <span class="s1">axs[</span><span class="s4">0</span><span class="s1">].set_xticklabels(classes</span><span class="s2">, </span><span class="s1">rotation=</span><span class="s4">90</span><span class="s1">)</span>
+
+    <span class="s0"># Plot the recall scores in the second subplot</span>
+    <span class="s1">axs[</span><span class="s4">1</span><span class="s1">].plot(classes</span><span class="s2">, </span><span class="s1">recall_scores</span><span class="s2">, </span><span class="s1">marker=</span><span class="s3">'o'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">1</span><span class="s1">].set_title(</span><span class="s3">'Recall Scores by Class'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">1</span><span class="s1">].set_xlabel(</span><span class="s3">'Class'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">1</span><span class="s1">].set_ylabel(</span><span class="s3">'Recall Score'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">1</span><span class="s1">].set_xticks(range(len(classes)))</span>
+    <span class="s1">axs[</span><span class="s4">1</span><span class="s1">].set_xticklabels(classes</span><span class="s2">, </span><span class="s1">rotation=</span><span class="s4">90</span><span class="s1">)</span>
+
+    <span class="s0"># Plot the precision scores in the third subplot</span>
+    <span class="s1">axs[</span><span class="s4">2</span><span class="s1">].plot(classes</span><span class="s2">, </span><span class="s1">precision_scores</span><span class="s2">, </span><span class="s1">marker=</span><span class="s3">'o'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">2</span><span class="s1">].set_title(</span><span class="s3">'Precision Scores by Class'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">2</span><span class="s1">].set_xlabel(</span><span class="s3">'Class'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">2</span><span class="s1">].set_ylabel(</span><span class="s3">'Precision Score'</span><span class="s1">)</span>
+    <span class="s1">axs[</span><span class="s4">2</span><span class="s1">].set_xticks(range(len(classes)))</span>
+    <span class="s1">axs[</span><span class="s4">2</span><span class="s1">].set_xticklabels(classes</span><span class="s2">, </span><span class="s1">rotation=</span><span class="s4">90</span><span class="s1">)</span>
+    <span class="s1">plt.subplots_adjust(wspace=</span><span class="s4">0.4</span><span class="s1">)</span>
+    <span class="s1">plt.show()</span>
+<span class="s0">#%% md 
+</span><span class="s1"># Base models (LSTM &amp; GRU) 
+</span><span class="s0">#%% 
+# LSTM RNN</span>
+<span class="s1">model_bi_lstm = Sequential()</span>
+<span class="s1">model_bi_lstm.add(Embedding(num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s2">, </span><span class="s1">weights=[embedding_matrix_glove]</span><span class="s2">, </span><span class="s1">input_length=</span><span class="s4">300</span><span class="s2">, </span><span class="s1">trainable=</span><span class="s2">False</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.add(Bidirectional(CuDNNLSTM(</span><span class="s4">64</span><span class="s1">)))</span>
+<span class="s1">model_bi_lstm.add(Dense(</span><span class="s4">32</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;relu&quot;</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.add(Dense(</span><span class="s4">13</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;softmax&quot;</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.compile(optimizer=</span><span class="s3">&quot;adam&quot;</span><span class="s2">, </span><span class="s1">loss=</span><span class="s3">&quot;categorical_crossentropy&quot;</span><span class="s2">, </span><span class="s1">metrics=[</span><span class="s3">&quot;accuracy&quot;</span><span class="s1">])</span>
+
+
+<span class="s0"># Default padding is to the longest sequence</span>
+<span class="s2">for </span><span class="s1">train_index</span><span class="s2">, </span><span class="s1">test_index </span><span class="s2">in </span><span class="s1">sss.split(sequences</span><span class="s2">, </span><span class="s1">target):</span>
+    <span class="s1">X_train</span><span class="s2">, </span><span class="s1">X_test = final_seqs[train_index]</span><span class="s2">, </span><span class="s1">final_seqs[test_index]</span>
+    <span class="s1">y_train</span><span class="s2">, </span><span class="s1">y_test = target[train_index]</span><span class="s2">, </span><span class="s1">target[test_index]</span>
+
+    <span class="s1">hist = model_bi_lstm.fit(X_train</span><span class="s2">, </span><span class="s1">y_train</span><span class="s2">, </span><span class="s1">epochs=</span><span class="s4">30</span><span class="s2">, </span><span class="s1">batch_size=</span><span class="s4">256</span><span class="s2">, </span><span class="s1">validation_split=</span><span class="s4">0.2</span><span class="s1">)</span>
+    <span class="s1">y_pred = np.rint(model_bi_lstm.predict(X_test))</span>
+    <span class="s1">plot_history(hist)</span>
+    <span class="s1">print(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s1">))</span>
+    <span class="s1">plot_metrics(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">output_dict=</span><span class="s2">True</span><span class="s1">))</span>
+<span class="s0">#%% 
+# GRU RNN</span>
+<span class="s1">model_gru = Sequential()</span>
+<span class="s1">model_gru.add(Embedding(num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s2">, </span><span class="s1">weights=[embedding_matrix_glove]</span><span class="s2">, </span><span class="s1">input_length=</span><span class="s4">300</span><span class="s2">, </span><span class="s1">trainable=</span><span class="s2">False</span><span class="s1">))</span>
+<span class="s1">model_gru.add(Bidirectional(CuDNNGRU(</span><span class="s4">64</span><span class="s1">)))</span>
+<span class="s1">model_gru.add(Dense(</span><span class="s4">32</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;relu&quot;</span><span class="s1">))</span>
+<span class="s1">model_gru.add(Dense(</span><span class="s4">13</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;softmax&quot;</span><span class="s1">))</span>
+<span class="s1">model_gru.compile(optimizer=</span><span class="s3">&quot;adam&quot;</span><span class="s2">, </span><span class="s1">loss=</span><span class="s3">&quot;categorical_crossentropy&quot;</span><span class="s2">, </span><span class="s1">metrics=[</span><span class="s3">&quot;accuracy&quot;</span><span class="s1">])</span>
+
+
+<span class="s0"># Default padding is to the longest sequence</span>
+<span class="s2">for </span><span class="s1">train_index</span><span class="s2">, </span><span class="s1">test_index </span><span class="s2">in </span><span class="s1">sss.split(sequences</span><span class="s2">, </span><span class="s1">target):</span>
+    <span class="s1">X_train</span><span class="s2">, </span><span class="s1">X_test = final_seqs[train_index]</span><span class="s2">, </span><span class="s1">final_seqs[test_index]</span>
+    <span class="s1">y_train</span><span class="s2">, </span><span class="s1">y_test = target[train_index]</span><span class="s2">, </span><span class="s1">target[test_index]</span>
+
+    <span class="s1">hist = model_gru.fit(X_train</span><span class="s2">, </span><span class="s1">y_train</span><span class="s2">, </span><span class="s1">epochs=</span><span class="s4">30</span><span class="s2">, </span><span class="s1">batch_size=</span><span class="s4">256</span><span class="s2">, </span><span class="s1">validation_split=</span><span class="s4">0.2</span><span class="s1">)</span>
+    <span class="s1">y_pred = np.rint(model_gru.predict(X_test))</span>
+    <span class="s1">plot_history(hist)</span>
+    <span class="s1">print(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s1">))</span>
+    <span class="s1">plot_metrics(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">output_dict=</span><span class="s2">True</span><span class="s1">))</span>
+<span class="s0">#%% md 
+</span><span class="s1"># Hyperparameters optimized 
+</span><span class="s0">#%% 
+# LSTM RNN</span>
+<span class="s1">model_bi_lstm = Sequential()</span>
+<span class="s1">model_bi_lstm.add(Embedding(num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s2">, </span><span class="s1">weights=[embedding_matrix_glove]</span><span class="s2">, </span><span class="s1">input_length=</span><span class="s4">300</span><span class="s2">, </span><span class="s1">trainable=</span><span class="s2">False</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.add(Bidirectional(CuDNNLSTM(units=</span><span class="s4">32</span><span class="s2">, </span><span class="s1">recurrent_regularizer=regularizers.l2(</span><span class="s4">0.15</span><span class="s1">))))</span>
+<span class="s1">model_bi_lstm.add(Dense(</span><span class="s4">13</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;softmax&quot;</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.compile(optimizer=</span><span class="s3">&quot;adam&quot;</span><span class="s2">, </span><span class="s1">loss=</span><span class="s3">&quot;categorical_crossentropy&quot;</span><span class="s2">, </span><span class="s1">metrics=[</span><span class="s3">&quot;accuracy&quot;</span><span class="s1">])</span>
+
+
+<span class="s0"># Default padding is to the longest sequence</span>
+<span class="s2">for </span><span class="s1">train_index</span><span class="s2">, </span><span class="s1">test_index </span><span class="s2">in </span><span class="s1">sss.split(sequences</span><span class="s2">, </span><span class="s1">target):</span>
+    <span class="s1">X_train</span><span class="s2">, </span><span class="s1">X_test = final_seqs[train_index]</span><span class="s2">, </span><span class="s1">final_seqs[test_index]</span>
+    <span class="s1">y_train</span><span class="s2">, </span><span class="s1">y_test = target[train_index]</span><span class="s2">, </span><span class="s1">target[test_index]</span>
+
+    <span class="s1">hist = model_bi_lstm.fit(X_train</span><span class="s2">, </span><span class="s1">y_train</span><span class="s2">, </span><span class="s1">epochs=</span><span class="s4">30</span><span class="s2">, </span><span class="s1">batch_size=</span><span class="s4">256</span><span class="s2">, </span><span class="s1">validation_split=</span><span class="s4">0.2</span><span class="s1">)</span>
+    <span class="s1">y_pred = np.rint(model_bi_lstm.predict(X_test))</span>
+    <span class="s1">plot_history(hist)</span>
+    <span class="s1">print(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s1">))</span>
+    <span class="s1">plot_metrics(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">output_dict=</span><span class="s2">True</span><span class="s1">))</span>
+<span class="s0">#%% 
+# GRU RNN</span>
+<span class="s1">model_gru = Sequential()</span>
+<span class="s1">model_gru.add(Embedding(num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s2">, </span><span class="s1">weights=[embedding_matrix_glove]</span><span class="s2">, </span><span class="s1">input_length=</span><span class="s4">300</span><span class="s2">, </span><span class="s1">trainable=</span><span class="s2">False</span><span class="s1">))</span>
+<span class="s1">model_gru.add(Bidirectional(CuDNNGRU(</span><span class="s4">32</span><span class="s2">, </span><span class="s1">recurrent_regularizer=regularizers.l2(</span><span class="s4">0.15</span><span class="s1">))))</span>
+<span class="s1">model_gru.add(Dense(</span><span class="s4">13</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;softmax&quot;</span><span class="s1">))</span>
+<span class="s1">model_gru.compile(optimizer=</span><span class="s3">&quot;adam&quot;</span><span class="s2">, </span><span class="s1">loss=</span><span class="s3">&quot;categorical_crossentropy&quot;</span><span class="s2">, </span><span class="s1">metrics=[</span><span class="s3">&quot;accuracy&quot;</span><span class="s1">])</span>
+
+
+<span class="s0"># Default padding is to the longest sequence</span>
+<span class="s2">for </span><span class="s1">train_index</span><span class="s2">, </span><span class="s1">test_index </span><span class="s2">in </span><span class="s1">sss.split(sequences</span><span class="s2">, </span><span class="s1">target):</span>
+    <span class="s1">X_train</span><span class="s2">, </span><span class="s1">X_test = final_seqs[train_index]</span><span class="s2">, </span><span class="s1">final_seqs[test_index]</span>
+    <span class="s1">y_train</span><span class="s2">, </span><span class="s1">y_test = target[train_index]</span><span class="s2">, </span><span class="s1">target[test_index]</span>
+
+    <span class="s1">hist = model_gru.fit(X_train</span><span class="s2">, </span><span class="s1">y_train</span><span class="s2">, </span><span class="s1">epochs=</span><span class="s4">30</span><span class="s2">, </span><span class="s1">batch_size=</span><span class="s4">256</span><span class="s2">, </span><span class="s1">validation_split=</span><span class="s4">0.2</span><span class="s1">)</span>
+    <span class="s1">y_pred = np.rint(model_gru.predict(X_test))</span>
+    <span class="s1">plot_history(hist)</span>
+    <span class="s1">print(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s1">))</span>
+    <span class="s1">plot_metrics(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">output_dict=</span><span class="s2">True</span><span class="s1">))</span>
+<span class="s0">#%% md 
+</span><span class="s1"># Hyperparameter Tuning Details &amp; Experimentation 
+ 
+For the hyperparameters, the ones we modified were the embedding size, regularization term, and the number of units in the RNN. We also removed a Dense layer from the inital models, in both the GRU and the LSTM. 
+The number of units was modified because the RNN frequently ran into issues with overfitting, as the accuracy tended to be higher but the validation was getting lower. To combat this, we decreased the number of units so that the loss of the validation set is proportional to the loss of the training set. By default, it was set to 64 but then we modified to 32; we did this because 64 was a middlepoint between the size of the input and the size of our output. We decrease it by 1 power of 2 to decrease the amount of overfitting; the smaller the unit size the less likely we are to overfit. This made our loss more porportional with respect to training and validation. 
+The loss was still going up over time, so to combat this so we added L2 regularization to several of the models. This generalizes our predictions more, and reduces bias on any given node and reduces overfitting to our training set. 
+For embedding sizes, we determined it by the number of vocabulary terms (word_index + 1; the length of the word_index of the tokenizer plus 1) and the size of any given vocabulary term within our word embeddings (300 dimensions per vector) for Glove and Numberbatch. 
+ 
+Our learnings from the base models were applied on the subsequent models as well (multi-chain model, and the numberbatch model) 
+</span><span class="s0">#%% md 
+</span><span class="s1"># Multi-chain 
+</span><span class="s0">#%% 
+# GRU RNN</span>
+<span class="s1">model_multichain_gru = Sequential()</span>
+<span class="s1">model_multichain_gru.add(Embedding(num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s2">, </span><span class="s1">weights=[embedding_matrix_glove]</span><span class="s2">, </span><span class="s1">input_length=</span><span class="s4">300</span><span class="s2">, </span><span class="s1">trainable=</span><span class="s2">False</span><span class="s1">))</span>
+<span class="s1">model_multichain_gru.add(Bidirectional(CuDNNGRU(</span><span class="s4">32</span><span class="s2">, </span><span class="s1">return_sequences=</span><span class="s2">True</span><span class="s1">)))</span>
+<span class="s1">model_multichain_gru.add(Bidirectional(CuDNNGRU(</span><span class="s4">32</span><span class="s2">, </span><span class="s1">recurrent_regularizer=regularizers.l2(</span><span class="s4">0.15</span><span class="s1">))))</span>
+<span class="s1">model_multichain_gru.add(Dense(</span><span class="s4">13</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;softmax&quot;</span><span class="s1">))</span>
+<span class="s1">model_multichain_gru.compile(optimizer=</span><span class="s3">&quot;adam&quot;</span><span class="s2">, </span><span class="s1">loss=</span><span class="s3">&quot;categorical_crossentropy&quot;</span><span class="s2">, </span><span class="s1">metrics=[</span><span class="s3">&quot;accuracy&quot;</span><span class="s1">])</span>
+
+
+<span class="s0"># Default padding is to the longest sequence</span>
+<span class="s2">for </span><span class="s1">train_index</span><span class="s2">, </span><span class="s1">test_index </span><span class="s2">in </span><span class="s1">sss.split(sequences</span><span class="s2">, </span><span class="s1">target):</span>
+    <span class="s1">X_train</span><span class="s2">, </span><span class="s1">X_test = final_seqs[train_index]</span><span class="s2">, </span><span class="s1">final_seqs[test_index]</span>
+    <span class="s1">y_train</span><span class="s2">, </span><span class="s1">y_test = target[train_index]</span><span class="s2">, </span><span class="s1">target[test_index]</span>
+
+    <span class="s1">hist = model_multichain_gru.fit(X_train</span><span class="s2">, </span><span class="s1">y_train</span><span class="s2">, </span><span class="s1">epochs=</span><span class="s4">30</span><span class="s2">, </span><span class="s1">batch_size=</span><span class="s4">256</span><span class="s2">, </span><span class="s1">validation_split=</span><span class="s4">0.2</span><span class="s1">)</span>
+    <span class="s1">y_pred = np.rint(model_multichain_gru.predict(X_test))</span>
+    <span class="s1">plot_history(hist)</span>
+    <span class="s1">print(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s1">))</span>
+    <span class="s1">plot_metrics(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">output_dict=</span><span class="s2">True</span><span class="s1">))</span>
+<span class="s0">#%% md 
+</span><span class="s1"># Model Comparison &amp; Secondary Hyperparameter explanation 
+ 
+In the base models for the LSTM and GNU, we saw that the LSTM had the highest overall F1 score &amp; recall (the macro average F1 Score in stated in the classification report printout). Although each of the networks didn't achieve the accuracy we desired due to constraints on epochs as they were very time intensive operations for our machines, we tuned our hyper parameters to optimize the results to minimize loss, and improve validation accuracy. 
+ 
+The highest overall macro F1 Score was achieved the base model LSTM, the highest macro average precision score was achieved by the Hyper parameter tuned Bi LSTM, and the highest macro average recall was achieved by the base LSTM model. 
+ 
+In the plots for calculating each of the evaluation metrics scores per class label, we observed that sadness, neutral, and enthusiasm scored much low on the hyper parameter tuned models than the base models with significant differences. In the base models, the metrics were measured a little above .1 across those three classes but in the tuned models they were around 0. In general we observed that some of the models had a large discrepancies between precision and recall scores per class. For example, the tuned Bi LSTM model had a Recall score around .15 for happiness but the Precision score was much higher around .35. This means that the model was good at classifying the actual result of the sample than overall positive classification. 
+ 
+This would ideal for us because given the business context, it is important to correctly classify sentiment per tweet as this data could be fed into systems which rely on an identification of social sentiment, or the results could be used for understanding users sentiment towards a specific event. However, this only applies if uniformity of a higher precision score was applied across all classes. 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1"># Numberbatch 
+</span><span class="s0">#%% 
+# Load in the word embeddings</span>
+<span class="s1">word_vectors = {}</span>
+<span class="s2">for </span><span class="s1">line </span><span class="s2">in </span><span class="s1">open(</span><span class="s3">&quot;numberbatch-en.txt&quot;</span><span class="s1">):</span>
+    <span class="s1">value = line.split(</span><span class="s3">' '</span><span class="s1">)</span>
+    <span class="s1">word_vectors[value[</span><span class="s4">0</span><span class="s1">]] = np.array(value[</span><span class="s4">1</span><span class="s1">:]</span><span class="s2">,</span><span class="s1">dtype = </span><span class="s3">'float32'</span><span class="s1">)</span>
+
+<span class="s0"># Apply embeddings to dataset</span>
+<span class="s1">embedding_matrix_numberbatch = np.zeros((num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s1">))</span>
+<span class="s2">for </span><span class="s1">word</span><span class="s2">, </span><span class="s1">index </span><span class="s2">in </span><span class="s1">tokenizer.word_index.items():</span>
+    <span class="s1">embedding = word_vectors.get(word)</span>
+    <span class="s2">if </span><span class="s1">embedding </span><span class="s2">is not None</span><span class="s1">:</span>
+        <span class="s1">embedding_matrix_numberbatch[index] = embedding</span>
+<span class="s0">#%% 
+# LSTM RNN</span>
+<span class="s1">model_bi_lstm = Sequential()</span>
+<span class="s1">model_bi_lstm.add(Embedding(num_vocab</span><span class="s2">, </span><span class="s4">300</span><span class="s2">, </span><span class="s1">weights=[embedding_matrix_numberbatch]</span><span class="s2">, </span><span class="s1">input_length=</span><span class="s4">300</span><span class="s2">, </span><span class="s1">trainable=</span><span class="s2">False</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.add(Bidirectional(CuDNNLSTM(</span><span class="s4">75</span><span class="s1">)))</span>
+<span class="s1">model_bi_lstm.add(Dense(</span><span class="s4">32</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;relu&quot;</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.add(Dense(</span><span class="s4">13</span><span class="s2">, </span><span class="s1">activation=</span><span class="s3">&quot;softmax&quot;</span><span class="s1">))</span>
+<span class="s1">model_bi_lstm.compile(optimizer=</span><span class="s3">&quot;adam&quot;</span><span class="s2">, </span><span class="s1">loss=</span><span class="s3">&quot;categorical_crossentropy&quot;</span><span class="s2">, </span><span class="s1">metrics=[</span><span class="s3">&quot;accuracy&quot;</span><span class="s1">])</span>
+
+
+<span class="s0"># Default padding is to the longest sequence</span>
+<span class="s2">for </span><span class="s1">train_index</span><span class="s2">, </span><span class="s1">test_index </span><span class="s2">in </span><span class="s1">sss.split(sequences</span><span class="s2">, </span><span class="s1">target):</span>
+    <span class="s1">X_train</span><span class="s2">, </span><span class="s1">X_test = final_seqs[train_index]</span><span class="s2">, </span><span class="s1">final_seqs[test_index]</span>
+    <span class="s1">y_train</span><span class="s2">, </span><span class="s1">y_test = target[train_index]</span><span class="s2">, </span><span class="s1">target[test_index]</span>
+
+    <span class="s1">hist = model_bi_lstm.fit(X_train</span><span class="s2">, </span><span class="s1">y_train</span><span class="s2">, </span><span class="s1">epochs=</span><span class="s4">30</span><span class="s2">, </span><span class="s1">batch_size=</span><span class="s4">256</span><span class="s2">, </span><span class="s1">validation_split=</span><span class="s4">0.2</span><span class="s1">)</span>
+    <span class="s1">y_pred = np.rint(model_bi_lstm.predict(X_test))</span>
+    <span class="s1">plot_history(hist)</span>
+    <span class="s1">print(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s1">))</span>
+    <span class="s1">plot_metrics(classification_report(y_test</span><span class="s2">, </span><span class="s1">y_pred</span><span class="s2">, </span><span class="s1">zero_division=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">output_dict=</span><span class="s2">True</span><span class="s1">))</span>
+<span class="s0">#%% md 
+</span>
+<span class="s0">#%% md 
+</span><span class="s1"># Numberbatch Reasoning 
+ 
+Because we are doing NLP, taking in some text data and trying to classify to some sentiment; we must be able to accurately guage the semantics of any given word. We can do this with predefined word embeddings. Numberbatch ends up being a more compatible word embedding because the embedding are hand tuned by researchers to reduce the emotional bias present from the general public. Because these large word embeddings are typically sourced by crawling the web, or from biased sources, they tend to pickup common connotations of words. For instance, names; something like John could pickup a positive sentiment than another name, which may not make much sense. Number batch is useful for us because researchers reduce bias within the embeddings, which we want because we want an accurate depiction about the emotion presented by the tweet writer in the tweet. Numberbatch is effectively denoised from any bias. 
+ 
+ 
+ 
+</span><span class="s0">#%% 
+</span></pre>
+</body>
+</html>
